@@ -30,6 +30,9 @@ class GameScene: SKScene {
     // Wisch-Spuren
     private var wipeTrailNodes: [SKNode] = []
 
+    // Aktives Theme
+    private var currentTheme: GameTheme { ThemeManager.shared.currentTheme }
+
     // Touch Tracking
     private var lastTouchPositions: [UITouch: CGPoint] = [:]
 
@@ -39,7 +42,7 @@ class GameScene: SKScene {
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
-        backgroundColor = SKColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1.0)
+        backgroundColor = currentTheme.sceneBackgroundColor
 
         viewModel.sceneSize = size
         viewModel.onEvent = { [weak self] event in
@@ -47,10 +50,19 @@ class GameScene: SKScene {
         }
 
         backgroundNode = BackgroundNode()
-        backgroundNode.setup(size: size)
+        backgroundNode.setup(size: size, theme: currentTheme)
         addChild(backgroundNode)
 
         showMenu()
+    }
+
+    /// Hintergrund und Szenenfarbe auf aktuelles Theme aktualisieren
+    func applyTheme() {
+        backgroundColor = currentTheme.sceneBackgroundColor
+        backgroundNode?.removeFromParent()
+        backgroundNode = BackgroundNode()
+        backgroundNode.setup(size: size, theme: currentTheme)
+        addChild(backgroundNode)
     }
 
     // MARK: - State Transitions
@@ -59,6 +71,13 @@ class GameScene: SKScene {
         cleanupGameNodes()
 
         menuNode = MenuNode()
+        menuNode!.onThemeChanged = { [weak self] in
+            guard let self = self else { return }
+            self.applyTheme()
+            self.menuNode?.removeFromParent()
+            self.menuNode = nil
+            self.showMenu()
+        }
         menuNode!.setup(size: size, leaderboard: viewModel.leaderboard.entries)
         addChild(menuNode!)
     }
@@ -153,6 +172,7 @@ class GameScene: SKScene {
             hudNode?.updateLives(lives)
 
         case .waveStarted(let wave):
+            ThemeManager.shared.reportWave(wave)
             hudNode?.updateWave(wave)
             showWaveAnnouncement(wave)
 
@@ -300,7 +320,7 @@ class GameScene: SKScene {
         let now = CACurrentMediaTime()
         let readySpawns = pendingSpawns.filter { $0.1 <= now }
         for spawn in readySpawns {
-            let node = SmudgeNode(model: spawn.0)
+            let node = SmudgeNode(model: spawn.0, theme: currentTheme)
             node.zPosition = 5
             addChild(node)
             smudgeNodes[spawn.0.id] = node
@@ -325,9 +345,14 @@ class GameScene: SKScene {
 
             let touchedNode = atPoint(location)
 
-            if viewModel.state == .menu && touchedNode.name == "startButton" {
-                startPlaying()
-                return
+            if viewModel.state == .menu {
+                if touchedNode.name == "startButton" {
+                    startPlaying()
+                    return
+                }
+                if menuNode?.handleThemeTap(nodeName: touchedNode.name) == true {
+                    return
+                }
             }
 
             if viewModel.state == .gameOver {
@@ -571,7 +596,7 @@ class GameScene: SKScene {
         path.addLine(to: to)
 
         let trail = SKShapeNode(path: path)
-        trail.strokeColor = SKColor(white: 0.3, alpha: 0.15)
+        trail.strokeColor = currentTheme.wipeTrailColor.withAlphaComponent(currentTheme.wipeTrailAlpha)
         trail.lineWidth = CGFloat.random(in: 8...16)
         trail.lineCap = .round
         trail.zPosition = 1

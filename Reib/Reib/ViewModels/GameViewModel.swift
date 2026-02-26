@@ -505,8 +505,9 @@ class GameViewModel {
 
         // Boss-Welle: nur weiter wenn Boss besiegt
         if isBossWave {
+            let allCleared = smudges.isEmpty
             let allRevealed = !smudges.isEmpty && smudges.allSatisfy { $0.isRevealed }
-            if allRevealed {
+            if allCleared || allRevealed {
                 smudges.removeAll()
                 advanceWave()
                 spawnWave()
@@ -515,11 +516,13 @@ class GameViewModel {
         }
 
         // Normale Wellen-Check
+        // allCleared: Collection-Animationen haben alle Flecken entfernt (z.B. nach Freeze)
+        let allCleared = smudges.isEmpty && lastWaveTime > 0
         let allRevealed = !smudges.isEmpty && smudges.allSatisfy { $0.isRevealed }
         let timeSinceWave = CACurrentMediaTime() - lastWaveTime
         let timeForNewWave = timeSinceWave > waveDelay
 
-        if !isFrozen && (allRevealed || (timeForNewWave && !smudges.isEmpty)) {
+        if !isFrozen && (allCleared || allRevealed || (timeForNewWave && !smudges.isEmpty)) {
             for smudge in smudges where !smudge.isRevealed {
                 onEvent?(.smudgeExpired(smudge.id))
             }

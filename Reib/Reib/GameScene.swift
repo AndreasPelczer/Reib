@@ -73,6 +73,9 @@ class GameScene: SKScene {
         hudNode!.setup(size: size)
         addChild(hudNode!)
 
+        HapticManager.shared.prepare()
+        SoundManager.shared.prepare()
+
         viewModel.startGame()
     }
 
@@ -165,23 +168,37 @@ class GameScene: SKScene {
             case .star:
                 let comboText = viewModel.combo.multiplier > 1 ? " (x\(viewModel.combo.multiplier))" : ""
                 showFloatingText("+\(points)\(comboText)", at: node.position, color: .yellow)
+                HapticManager.shared.star()
+                SoundManager.shared.playStar()
             case .doubleStar:
                 let comboText = viewModel.combo.multiplier > 1 ? " (x\(viewModel.combo.multiplier))" : ""
                 let color: SKColor = node.behavior == .gold
                     ? SKColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
                     : .orange
                 showFloatingText("+\(points)\(comboText)", at: node.position, color: color)
+                HapticManager.shared.star()
+                SoundManager.shared.playDoubleStar()
             case .bomb:
                 showFloatingText("💥", at: node.position, color: .red)
+                HapticManager.shared.bomb()
+                SoundManager.shared.playBomb()
             case .timeBonus:
                 showFloatingText("+2s", at: node.position, color: .cyan)
+                HapticManager.shared.star()
+                SoundManager.shared.playStar()
             case .freeze:
                 showFloatingText("FREEZE!", at: node.position, color: .cyan)
+                HapticManager.shared.freeze()
+                SoundManager.shared.playFreeze()
             case .chain:
                 let comboText = viewModel.combo.multiplier > 1 ? " (x\(viewModel.combo.multiplier))" : ""
                 showFloatingText("+\(points)\(comboText)", at: node.position, color: .purple)
+                HapticManager.shared.chain()
+                SoundManager.shared.playChain()
             case .bossReward:
                 showFloatingText("+\(points) 👑", at: node.position, color: .yellow, fontSize: 36)
+                HapticManager.shared.bossDefeated()
+                SoundManager.shared.playBossDefeated()
             }
 
             node.playCollectionAnimation { [weak self] in
@@ -211,6 +228,7 @@ class GameScene: SKScene {
         case .lifeLost:
             backgroundNode?.playShake()
             showRedFlash()
+            HapticManager.shared.lifeLost()
 
         case .waveDelayBonus:
             break
@@ -229,6 +247,7 @@ class GameScene: SKScene {
         case .chainCompleted(let bonus):
             showFloatingText("KETTE KOMPLETT! +\(bonus)", at: CGPoint(x: size.width / 2, y: size.height * 0.5), color: .purple, fontSize: 32)
             spawnCelebrationBurst(at: CGPoint(x: size.width / 2, y: size.height * 0.5))
+            HapticManager.shared.chainComplete()
 
         case .chainBroken:
             showFloatingText("KETTE GEBROCHEN", at: CGPoint(x: size.width / 2, y: size.height * 0.45), color: SKColor(white: 0.5, alpha: 1.0))
@@ -239,11 +258,16 @@ class GameScene: SKScene {
         case .bossDefeated(let bonus):
             showFloatingText("BOSS BESIEGT! +\(bonus)", at: CGPoint(x: size.width / 2, y: size.height * 0.55), color: .yellow, fontSize: 36)
             spawnCelebrationBurst(at: CGPoint(x: size.width / 2, y: size.height / 2))
+            HapticManager.shared.bossDefeated()
+            SoundManager.shared.playBossDefeated()
 
         case .extraLife:
             showFloatingText("+1 ❤️", at: CGPoint(x: 60, y: size.height - 50), color: .red)
+            HapticManager.shared.extraLife()
+            SoundManager.shared.playExtraLife()
 
         case .gameOver(let score, let wave, let cleared, let bestStreak, let isNewHighscore):
+            SoundManager.shared.stopWipe()
             for (id, node) in smudgeNodes {
                 node.run(SKAction.sequence([
                     SKAction.group([
@@ -367,10 +391,12 @@ class GameScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches { lastTouchPositions.removeValue(forKey: touch) }
+        if lastTouchPositions.isEmpty { SoundManager.shared.stopWipe() }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches { lastTouchPositions.removeValue(forKey: touch) }
+        if lastTouchPositions.isEmpty { SoundManager.shared.stopWipe() }
     }
 
     // MARK: - Rub → ViewModel → Visual Feedback
@@ -382,6 +408,9 @@ class GameScene: SKScene {
             node.updateRubProgress(result.progress)
             node.spawnDirtParticle(at: point)
         }
+
+        HapticManager.shared.rub(intensity: intensity)
+        SoundManager.shared.updateWipe(intensity: intensity)
     }
 
     // MARK: - Visuelle Effekte

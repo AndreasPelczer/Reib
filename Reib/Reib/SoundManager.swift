@@ -2,7 +2,7 @@
 //  SoundManager.swift
 //  Reib
 //
-//  Synthetisierte Sound-Effekte ohne externe Audio-Dateien.
+//  Sound-Effekte: Wisch-Sound aus MP3, Rest synthetisiert.
 //  Verwendet AVAudioEngine mit vorgenerierten PCM-Buffern.
 //
 
@@ -23,6 +23,7 @@ final class SoundManager {
 
     // Wisch-Sound (Endlosschleife, lautstärkegesteuert)
     private let wipePlayer = AVAudioPlayerNode()
+    private var wipeFormat: AVAudioFormat?
     private var isWipePlaying = false
 
     // Vorgenerierte Buffer
@@ -48,9 +49,13 @@ final class SoundManager {
 
         configureAudioSession()
 
-        // Wipe-Player
+        // Wipe-Sound aus MP3 laden
+        wipeBuffer = loadWipeFromFile()
+        wipeFormat = wipeBuffer?.format ?? format
+
+        // Wipe-Player im Format der geladenen Datei verbinden
         engine.attach(wipePlayer)
-        engine.connect(wipePlayer, to: engine.mainMixerNode, format: format)
+        engine.connect(wipePlayer, to: engine.mainMixerNode, format: wipeFormat)
         wipePlayer.volume = 0
 
         // One-Shot-Pool
@@ -63,8 +68,7 @@ final class SoundManager {
 
         engine.mainMixerNode.outputVolume = 0.6
 
-        // Buffer generieren
-        wipeBuffer = generateWipe()
+        // Buffer generieren (wipeBuffer wurde oben geladen)
         plingBuffer = generatePling(freq1: 880, freq2: 1320, duration: 0.25)
         doublePlingBuffer = generateDoublePling()
         boomBuffer = generateBoom()
@@ -130,34 +134,24 @@ final class SoundManager {
 
     // MARK: - Sound-Synthese
 
-    /// Wisch-Geräusch: bandpass-gefiltertes Rauschen (~0.15s Loop)
-    private func generateWipe() -> AVAudioPCMBuffer {
-        let duration = 0.15
-        let frameCount = AVAudioFrameCount(sampleRate * duration)
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-        buffer.frameLength = frameCount
-        let data = buffer.floatChannelData![0]
-
-        // Einfacher IIR-Bandpass um ~3kHz
-        var prev1: Float = 0
-        var prev2: Float = 0
-        let f0: Float = 3000.0 / Float(sampleRate)
-        let bw: Float = 0.4
-        let r: Float = 1.0 - .pi * bw * f0
-        let cosF: Float = cos(2.0 * .pi * f0)
-
-        for i in 0..<Int(frameCount) {
-            let noise = Float.random(in: -1...1)
-            let filtered = noise - 2.0 * r * cosF * prev1 + r * r * prev2
-            prev2 = prev1
-            prev1 = filtered
-
-            // Envelope: sanfter Ein-/Ausstieg für Loop
-            let t = Float(i) / Float(frameCount)
-            let env = sin(t * .pi) // Halbe Sinuswelle → nahtloser Loop
-            data[i] = filtered * env * 0.4
+    /// Wisch-Sound aus gebundelter MP3-Datei laden
+    private func loadWipeFromFile() -> AVAudioPCMBuffer? {
+        guard let url = Bundle.main.url(forResource: "Wischen2", withExtension: "mp3") else {
+            print("SoundManager: Wischen2.mp3 nicht im Bundle gefunden")
+            return nil
         }
-        return buffer
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let frameCount = AVAudioFrameCount(file.length)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frameCount) else {
+                return nil
+            }
+            try file.read(into: buffer)
+            return buffer
+        } catch {
+            print("SoundManager: Fehler beim Laden von Wischen2.mp3 – \(error)")
+            return nil
+        }
     }
 
     /// Pling: Zwei Sinuswellen mit schnellem Decay

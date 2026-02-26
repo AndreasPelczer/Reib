@@ -20,6 +20,9 @@ class SmudgeNode: SKNode {
     let chainIndex: Int
     let totalPixels: Int
 
+    // Aktives Theme
+    private let theme: GameTheme
+
     // Standard-Nodes
     private var dirtLayer: SKShapeNode!
     private var fingerprintContainer: SKNode!
@@ -37,7 +40,7 @@ class SmudgeNode: SKNode {
     private var bossHealthBarBg: SKShapeNode?
     private var bossHealthBarFill: SKShapeNode?
 
-    init(model: SmudgeModel) {
+    init(model: SmudgeModel, theme: GameTheme? = nil) {
         self.smudgeID = model.id
         self.reward = model.reward
         self.behavior = model.behavior
@@ -45,6 +48,7 @@ class SmudgeNode: SKNode {
         self.chainGroupID = model.chainGroupID
         self.chainIndex = model.chainIndex
         self.totalPixels = model.totalPixels
+        self.theme = theme ?? ThemeManager.shared.currentTheme
         super.init()
         self.position = model.position
         setupVisuals()
@@ -66,18 +70,18 @@ class SmudgeNode: SKNode {
         rewardIcon.zPosition = 0
         addChild(rewardIcon)
 
-        // Dreckfleck-Basis – Farbe je nach Typ
+        // Dreckfleck-Basis – Farbe je nach Typ und Theme
         switch behavior {
-        case .oil:  dirtColor = Self.oilColor()
+        case .oil:  dirtColor = oilColor()
         case .gold: dirtColor = Self.goldColor()
-        case .boss: dirtColor = Self.bossColor()
-        default:    dirtColor = Self.randomDirtColor()
+        case .boss: dirtColor = bossColor()
+        default:    dirtColor = randomDirtColor()
         }
 
         dirtLayer = SKShapeNode(circleOfRadius: radius)
         dirtLayer.fillColor = dirtColor
         dirtLayer.strokeColor = .clear
-        dirtLayer.alpha = behavior == .oil ? 0.75 : 0.88
+        dirtLayer.alpha = behavior == .oil ? 0.75 : theme.dirtAlpha
         dirtLayer.zPosition = 1
         addChild(dirtLayer)
 
@@ -159,7 +163,7 @@ class SmudgeNode: SKNode {
                         endAngle: startAngle + arcLength, clockwise: Bool.random())
 
             let swirl = SKShapeNode(path: path)
-            swirl.strokeColor = SKColor(white: 0.15, alpha: CGFloat.random(in: 0.2...0.5))
+            swirl.strokeColor = theme.oilSwirlColor.withAlphaComponent(CGFloat.random(in: 0.2...0.5))
             swirl.lineWidth = CGFloat.random(in: 1.0...2.5)
             swirl.fillColor = .clear
             swirl.glowWidth = 0.5
@@ -171,7 +175,7 @@ class SmudgeNode: SKNode {
         // Glanz-Highlight (versetzter heller Kreis)
         let glossRadius = radius * 0.35
         oilGlossNode = SKShapeNode(circleOfRadius: glossRadius)
-        oilGlossNode!.fillColor = SKColor(white: 1.0, alpha: 0.12)
+        oilGlossNode!.fillColor = SKColor(white: 1.0, alpha: theme.oilGlossAlpha)
         oilGlossNode!.strokeColor = .clear
         oilGlossNode!.position = CGPoint(x: -radius * 0.2, y: radius * 0.2)
         oilGlossNode!.zPosition = 1.8
@@ -276,7 +280,7 @@ class SmudgeNode: SKNode {
             }
 
             let crack = SKShapeNode(path: path)
-            crack.strokeColor = SKColor(red: 0.6, green: 0.1, blue: 0.1, alpha: CGFloat.random(in: 0.3...0.6))
+            crack.strokeColor = theme.bossCrackColor.withAlphaComponent(CGFloat.random(in: 0.3...0.6))
             crack.lineWidth = CGFloat.random(in: 1.0...2.5)
             crack.fillColor = .clear
             fingerprintContainer.addChild(crack)
@@ -322,7 +326,7 @@ class SmudgeNode: SKNode {
             let angle = CGFloat.random(in: 0...(.pi * 2))
             let dist = self.radius * CGFloat.random(in: 0.8...1.2)
             let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 2...5))
-            particle.fillColor = SKColor(red: 0.4, green: 0.05, blue: 0.05, alpha: 0.5)
+            particle.fillColor = self.theme.bossParticleColor
             particle.strokeColor = .clear
             particle.position = CGPoint(x: cos(angle) * dist, y: sin(angle) * dist)
             particle.zPosition = 0.5
@@ -344,8 +348,8 @@ class SmudgeNode: SKNode {
     // MARK: - Fingerabdruck zeichnen (Standard)
 
     private func drawFingerprint() {
-        let lighterColor = dirtColor.blended(withFraction: 0.15, of: SKColor(white: 0.6, alpha: 1.0))
-        let darkerColor = dirtColor.blended(withFraction: 0.12, of: .black)
+        let lighterColor = dirtColor.blended(withFraction: theme.fingerprintLighterBlend, of: SKColor(white: 0.6, alpha: 1.0))
+        let darkerColor = dirtColor.blended(withFraction: theme.fingerprintDarkerBlend, of: .black)
 
         let lineCount = Int(radius / 5)
         let centerOffset = CGPoint(
@@ -436,7 +440,7 @@ class SmudgeNode: SKNode {
     // MARK: - Reib-Feedback (visuell)
 
     func updateRubProgress(_ progress: CGFloat) {
-        let baseAlpha: CGFloat = behavior == .oil ? 0.75 : 0.88
+        let baseAlpha: CGFloat = behavior == .oil ? 0.75 : theme.dirtAlpha
         dirtLayer?.alpha = baseAlpha * (1.0 - progress)
         fingerprintContainer?.alpha = 1.0 - progress
         rewardIcon?.alpha = progress * 0.8
@@ -456,7 +460,7 @@ class SmudgeNode: SKNode {
     func spawnDirtParticle(at scenePoint: CGPoint) {
         guard let parentNode = parent else { return }
         let localPoint = convert(scenePoint, from: parentNode)
-        let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 1.5...3.5))
+        let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: theme.dirtParticleRadiusRange))
         particle.fillColor = dirtColor
         particle.strokeColor = .clear
         particle.position = localPoint
@@ -572,16 +576,9 @@ class SmudgeNode: SKNode {
 
     // MARK: - Helpers
 
-    private static func randomDirtColor() -> SKColor {
-        let colors: [(CGFloat, CGFloat, CGFloat)] = [
-            (0.35, 0.25, 0.15),
-            (0.40, 0.35, 0.25),
-            (0.30, 0.30, 0.28),
-            (0.45, 0.38, 0.20),
-            (0.32, 0.28, 0.22),
-        ]
-        let c = colors.randomElement()!
-        let v: CGFloat = 0.05
+    private func randomDirtColor() -> SKColor {
+        let c = theme.dirtColors.randomElement()!
+        let v = theme.dirtColorVariance
         return SKColor(
             red: c.0 + CGFloat.random(in: -v...v),
             green: c.1 + CGFloat.random(in: -v...v),
@@ -590,11 +587,11 @@ class SmudgeNode: SKNode {
         )
     }
 
-    private static func oilColor() -> SKColor {
+    private func oilColor() -> SKColor {
         return SKColor(
-            red: CGFloat.random(in: 0.08...0.15),
-            green: CGFloat.random(in: 0.06...0.12),
-            blue: CGFloat.random(in: 0.05...0.10),
+            red: CGFloat.random(in: theme.oilColorRange.r),
+            green: CGFloat.random(in: theme.oilColorRange.g),
+            blue: CGFloat.random(in: theme.oilColorRange.b),
             alpha: 1.0
         )
     }
@@ -608,11 +605,11 @@ class SmudgeNode: SKNode {
         )
     }
 
-    private static func bossColor() -> SKColor {
+    private func bossColor() -> SKColor {
         return SKColor(
-            red: CGFloat.random(in: 0.25...0.35),
-            green: CGFloat.random(in: 0.02...0.08),
-            blue: CGFloat.random(in: 0.02...0.08),
+            red: CGFloat.random(in: theme.bossColorRange.r),
+            green: CGFloat.random(in: theme.bossColorRange.g),
+            blue: CGFloat.random(in: theme.bossColorRange.b),
             alpha: 1.0
         )
     }

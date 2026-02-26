@@ -167,13 +167,21 @@ class GameScene: SKScene {
                 showFloatingText("+\(points)\(comboText)", at: node.position, color: .yellow)
             case .doubleStar:
                 let comboText = viewModel.combo.multiplier > 1 ? " (x\(viewModel.combo.multiplier))" : ""
-                showFloatingText("+\(points)\(comboText)", at: node.position, color: .orange)
+                let color: SKColor = node.behavior == .gold
+                    ? SKColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+                    : .orange
+                showFloatingText("+\(points)\(comboText)", at: node.position, color: color)
             case .bomb:
                 showFloatingText("💥", at: node.position, color: .red)
             case .timeBonus:
                 showFloatingText("+2s", at: node.position, color: .cyan)
             case .freeze:
                 showFloatingText("FREEZE!", at: node.position, color: .cyan)
+            case .chain:
+                let comboText = viewModel.combo.multiplier > 1 ? " (x\(viewModel.combo.multiplier))" : ""
+                showFloatingText("+\(points)\(comboText)", at: node.position, color: .purple)
+            case .bossReward:
+                showFloatingText("+\(points) 👑", at: node.position, color: .yellow, fontSize: 36)
             }
 
             node.playCollectionAnimation { [weak self] in
@@ -206,6 +214,34 @@ class GameScene: SKScene {
 
         case .waveDelayBonus:
             break
+
+        // Neue Events für die 4 Fleck-Typen
+        case .goldExpired(let id):
+            guard let node = smudgeNodes[id] else { return }
+            node.playGoldExpireAnimation()
+            showFloatingText("VERPASST!", at: node.position, color: SKColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 0.6))
+            smudgeNodes.removeValue(forKey: id)
+
+        case .chainProgress(_, let index):
+            let total = viewModel.config.chainSize
+            showFloatingText("KETTE \(index)/\(total)!", at: CGPoint(x: size.width / 2, y: size.height * 0.45), color: .purple)
+
+        case .chainCompleted(let bonus):
+            showFloatingText("KETTE KOMPLETT! +\(bonus)", at: CGPoint(x: size.width / 2, y: size.height * 0.5), color: .purple, fontSize: 32)
+            spawnCelebrationBurst(at: CGPoint(x: size.width / 2, y: size.height * 0.5))
+
+        case .chainBroken:
+            showFloatingText("KETTE GEBROCHEN", at: CGPoint(x: size.width / 2, y: size.height * 0.45), color: SKColor(white: 0.5, alpha: 1.0))
+
+        case .bossSpawned:
+            showBossAnnouncement()
+
+        case .bossDefeated(let bonus):
+            showFloatingText("BOSS BESIEGT! +\(bonus)", at: CGPoint(x: size.width / 2, y: size.height * 0.55), color: .yellow, fontSize: 36)
+            spawnCelebrationBurst(at: CGPoint(x: size.width / 2, y: size.height / 2))
+
+        case .extraLife:
+            showFloatingText("+1 ❤️", at: CGPoint(x: 60, y: size.height - 50), color: .red)
 
         case .gameOver(let score, let wave, let cleared, let bestStreak, let isNewHighscore):
             for (id, node) in smudgeNodes {
@@ -368,10 +404,10 @@ class GameScene: SKScene {
         ]))
     }
 
-    private func showFloatingText(_ text: String, at position: CGPoint, color: SKColor) {
+    private func showFloatingText(_ text: String, at position: CGPoint, color: SKColor, fontSize: CGFloat = 28) {
         let label = SKLabelNode(text: text)
         label.fontName = "AvenirNext-Bold"
-        label.fontSize = 28
+        label.fontSize = fontSize
         label.fontColor = color
         label.position = position
         label.zPosition = 30
@@ -384,6 +420,60 @@ class GameScene: SKScene {
             ]),
             SKAction.removeFromParent()
         ]))
+    }
+
+    private func showBossAnnouncement() {
+        let boss = SKLabelNode(text: "⚠️ BOSS! ⚠️")
+        boss.fontName = "AvenirNext-Heavy"
+        boss.fontSize = 44
+        boss.fontColor = .red
+        boss.position = CGPoint(x: size.width / 2, y: size.height / 2 + 100)
+        boss.zPosition = 35
+        boss.setScale(0.5)
+        addChild(boss)
+
+        boss.run(SKAction.sequence([
+            SKAction.group([
+                SKAction.scale(to: 1.2, duration: 0.3),
+                SKAction.fadeIn(withDuration: 0.2)
+            ]),
+            SKAction.wait(forDuration: 1.0),
+            SKAction.group([
+                SKAction.scale(to: 2.0, duration: 0.5),
+                SKAction.fadeOut(withDuration: 0.5)
+            ]),
+            SKAction.removeFromParent()
+        ]))
+
+        // Roter Screen-Blitz
+        showRedFlash()
+    }
+
+    private func spawnCelebrationBurst(at point: CGPoint) {
+        let colors: [SKColor] = [.yellow, .orange, .cyan, .green, .purple, .red]
+        for _ in 0..<20 {
+            let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 2...5))
+            particle.fillColor = colors.randomElement()!
+            particle.strokeColor = .clear
+            particle.glowWidth = 2
+            particle.position = point
+            particle.zPosition = 35
+            addChild(particle)
+
+            let angle = CGFloat.random(in: 0...(.pi * 2))
+            let dist = CGFloat.random(in: 50...150)
+            particle.run(SKAction.sequence([
+                SKAction.group([
+                    SKAction.move(to: CGPoint(
+                        x: point.x + cos(angle) * dist,
+                        y: point.y + sin(angle) * dist
+                    ), duration: 0.6),
+                    SKAction.fadeOut(withDuration: 0.6),
+                    SKAction.scale(to: 0.0, duration: 0.6)
+                ]),
+                SKAction.removeFromParent()
+            ]))
+        }
     }
 
     private func spawnRevealPulse(at point: CGPoint) {

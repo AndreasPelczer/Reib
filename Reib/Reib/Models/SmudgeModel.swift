@@ -15,6 +15,8 @@ enum SmudgeReward {
     case bomb
     case timeBonus
     case freeze
+    case chain       // Kettenfleck-Belohnung (Mega-Bonus bei vollständiger Kette)
+    case bossReward  // Boss-Belohnung (großer Bonus + Extra-Leben)
 
     var emoji: String {
         switch self {
@@ -23,6 +25,8 @@ enum SmudgeReward {
         case .bomb: return "💣"
         case .timeBonus: return "⏱️"
         case .freeze: return "🧊"
+        case .chain: return "🔗"
+        case .bossReward: return "👑"
         }
     }
 
@@ -40,6 +44,10 @@ enum SmudgeBehavior {
     case normal
     case moving
     case growing
+    case oil    // Breitet sich aus, beschleunigt bei langsamem Rubbeln
+    case gold   // Kurzzeitig sichtbar, muss sofort gerubbelt werden
+    case chain  // Teil einer Dreiergruppe
+    case boss   // Riesiger Boss-Fleck
 }
 
 // MARK: - Datenmodell eines Dreckflecks
@@ -51,11 +59,15 @@ struct SmudgeModel {
     let radius: CGFloat
     let basePosition: CGPoint
     let spawnTime: TimeInterval
-    let totalPixels: Int = 100
+    let totalPixels: Int
 
     // Drift-Seeds für deterministische Bewegung
     let driftSeedX: CGFloat = CGFloat.random(in: 0...(.pi * 2))
     let driftSeedY: CGFloat = CGFloat.random(in: 0...(.pi * 2))
+
+    // Chain-Daten
+    let chainGroupID: UUID?
+    let chainIndex: Int  // 1, 2, 3 innerhalb der Kette (0 = kein Kettenfleck)
 
     // Mutable State
     var rubbedPixels: Int = 0
@@ -66,13 +78,25 @@ struct SmudgeModel {
     var progress: CGFloat { CGFloat(rubbedPixels) / CGFloat(totalPixels) }
     var effectiveRadius: CGFloat { radius * scaleFactor }
 
-    init(reward: SmudgeReward, behavior: SmudgeBehavior, radius: CGFloat, position: CGPoint, spawnTime: TimeInterval) {
+    init(
+        reward: SmudgeReward,
+        behavior: SmudgeBehavior,
+        radius: CGFloat,
+        position: CGPoint,
+        spawnTime: TimeInterval,
+        totalPixels: Int = 100,
+        chainGroupID: UUID? = nil,
+        chainIndex: Int = 0
+    ) {
         self.reward = reward
         self.behavior = behavior
         self.radius = radius
         self.basePosition = position
         self.position = position
         self.spawnTime = spawnTime
+        self.totalPixels = totalPixels
+        self.chainGroupID = chainGroupID
+        self.chainIndex = chainIndex
     }
 
     // MARK: - Reib-Logik
@@ -106,8 +130,17 @@ struct SmudgeModel {
     }
 
     mutating func updateScale(currentTime: TimeInterval) {
-        guard behavior == .growing else { return }
-        let elapsed = CGFloat(currentTime - spawnTime)
-        scaleFactor = min(1.0 + elapsed * 0.0375, 1.3)
+        switch behavior {
+        case .growing:
+            let elapsed = CGFloat(currentTime - spawnTime)
+            scaleFactor = min(1.0 + elapsed * 0.0375, 1.3)
+        default:
+            break // .oil wird vom ViewModel gesteuert (braucht Config-Zugriff)
+        }
+    }
+
+    /// Sekunden seit Spawn
+    func age(at currentTime: TimeInterval) -> TimeInterval {
+        return currentTime - spawnTime
     }
 }

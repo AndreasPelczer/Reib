@@ -25,6 +25,15 @@ enum GameEvent {
     case lifeLost(CGPoint)
     case waveDelayBonus
     case gameOver(score: Int, wave: Int, cleared: Int, bestStreak: Int, isNewHighscore: Bool)
+
+    // Neue Events für die 4 Fleck-Typen
+    case goldExpired(UUID)
+    case chainProgress(groupID: UUID, index: Int)
+    case chainCompleted(bonus: Int)
+    case chainBroken
+    case bossSpawned
+    case bossDefeated(bonus: Int)
+    case extraLife
 }
 
 // MARK: - Ergebnis einer Reib-Aktion
@@ -54,6 +63,13 @@ class GameViewModel {
     private(set) var frozenUntil: TimeInterval = 0
     private(set) var streakCount: Int = 0
     private(set) var bestStreak: Int = 0
+
+    // Chain-Tracking
+    private(set) var activeChainGroupID: UUID?
+    private(set) var chainProgress: Int = 0
+
+    // Boss-Tracking
+    private(set) var isBossWave: Bool = false
 
     // Sub-Models
     private(set) var combo: ComboModel
@@ -94,6 +110,9 @@ class GameViewModel {
         streakCount = 0
         bestStreak = 0
         smudges = []
+        activeChainGroupID = nil
+        chainProgress = 0
+        isBossWave = false
 
         onEvent?(.stateChanged(.playing))
         onEvent?(.scoreChanged(0))
@@ -115,6 +134,9 @@ class GameViewModel {
     func backToMenu() {
         state = .menu
         smudges = []
+        activeChainGroupID = nil
+        chainProgress = 0
+        isBossWave = false
         onEvent?(.stateChanged(.menu))
     }
 
@@ -123,15 +145,45 @@ class GameViewModel {
     func spawnWave() {
         guard state == .playing else { return }
 
+        let now = CACurrentMediaTime()
+
+        // Boss-Welle? (alle N Wellen)
+        if wave % config.bossWaveInterval == 0 {
+            isBossWave = true
+            onEvent?(.waveStarted(wave))
+            onEvent?(.bossSpawned)
+            let boss = createBossSmudge(at: now)
+            smudges.append(boss)
+            onEvent?(.smudgeSpawned(boss))
+            lastWaveTime = now
+            return
+        }
+
+        isBossWave = false
         onEvent?(.waveStarted(wave))
 
         let count = smudgesForCurrentWave()
-        let now = CACurrentMediaTime()
 
-        for _ in 0..<count {
-            let smudge = createSmudge(at: now)
-            smudges.append(smudge)
-            onEvent?(.smudgeSpawned(smudge))
+        // Ketten-Fleck-Chance?
+        var spawnChain = false
+        if wave >= config.chainStartWave {
+            spawnChain = Int.random(in: 1...100) <= config.chainChance
+        }
+
+        if spawnChain {
+            spawnChainGroup(at: now)
+            let remaining = max(0, count - config.chainSize)
+            for _ in 0..<remaining {
+                let smudge = createSmudge(at: now)
+                smudges.append(smudge)
+                onEvent?(.smudgeSpawned(smudge))
+            }
+        } else {
+            for _ in 0..<count {
+                let smudge = createSmudge(at: now)
+                smudges.append(smudge)
+                onEvent?(.smudgeSpawned(smudge))
+            }
         }
 
         lastWaveTime = now
@@ -141,9 +193,30 @@ class GameViewModel {
         return min(smudgesPerWave + (wave - 1) / 2, config.maxSmudgesPerWave)
     }
 
+    // MARK: - Smudge-Erzeugung
+
     private func createSmudge(at time: TimeInterval) -> SmudgeModel {
-        let reward = randomReward()
+        // Gold-Chance prüfen (seltener Bonus-Fleck)
+        if wave >= config.goldStartWave && Int.random(in: 1...100) <= config.goldChance {
+            let radius = CGFloat.random(in: 30...45)
+            let position = findSpawnPosition(radius: radius)
+            return SmudgeModel(
+                reward: .doubleStar,
+                behavior: .gold,
+                radius: radius,
+                position: position,
+                spawnTime: time
+            )
+        }
+
+        var reward = randomReward()
         let behavior = randomBehavior()
+
+        // Öl: immer star oder doubleStar (Risiko-Belohnung)
+        if behavior == .oil {
+            reward = Bool.random() ? .star : .doubleStar
+        }
+
         let radius = CGFloat.random(in: 30...55)
         let position = findSpawnPosition(radius: radius)
 
@@ -154,6 +227,39 @@ class GameViewModel {
             position: position,
             spawnTime: time
         )
+    }
+
+    private func createBossSmudge(at time: TimeInterval) -> SmudgeModel {
+        let radius = CGFloat.random(in: config.bossRadiusMin...config.bossRadiusMax)
+        let position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
+        return SmudgeModel(
+            reward: .bossReward,
+            behavior: .boss,
+            radius: radius,
+            position: position,
+            spawnTime: time,
+            totalPixels: config.bossTotalPixels
+        )
+    }
+
+    private func spawnChainGroup(at time: TimeInterval) {
+        let groupID = UUID()
+
+        for i in 1...config.chainSize {
+            let radius = CGFloat.random(in: 30...45)
+            let position = findSpawnPosition(radius: radius)
+            let smudge = SmudgeModel(
+                reward: .chain,
+                behavior: .chain,
+                radius: radius,
+                position: position,
+                spawnTime: time,
+                chainGroupID: groupID,
+                chainIndex: i
+            )
+            smudges.append(smudge)
+            onEvent?(.smudgeSpawned(smudge))
+        }
     }
 
     private func findSpawnPosition(radius: CGFloat) -> CGPoint {
@@ -195,9 +301,12 @@ class GameViewModel {
         let moveChance = min(10 + (wave - config.movingSmudgeStartWave) * 3, 30)
         let growChance = wave >= config.growingSmudgeStartWave
             ? min(8 + (wave - config.growingSmudgeStartWave) * 2, 20) : 0
+        let oilChance = wave >= config.oilStartWave
+            ? min(5 + (wave - config.oilStartWave) * 2, 15) : 0
 
         if roll <= moveChance { return .moving }
         else if roll <= moveChance + growChance { return .growing }
+        else if roll <= moveChance + growChance + oilChance { return .oil }
         return .normal
     }
 
@@ -216,13 +325,14 @@ class GameViewModel {
 
         for i in 0..<smudges.count {
             guard !smudges[i].isRevealed else { continue }
-
-            // Erst prüfen ob Punkt im Fleck liegt
             guard smudges[i].containsPoint(point) else { continue }
 
             let wasRevealed = smudges[i].rub(at: point, intensity: intensity)
 
             if wasRevealed {
+                // Ketten-Logik (vor processReward)
+                handleChainLogic(for: smudges[i])
+
                 processReward(for: smudges[i])
             }
 
@@ -234,6 +344,47 @@ class GameViewModel {
             )
         }
         return nil
+    }
+
+    // MARK: - Ketten-Logik
+
+    private func handleChainLogic(for smudge: SmudgeModel) {
+        // Nicht-Ketten-Fleck aufgedeckt während Kette aktiv → Kette bricht
+        if smudge.reward != .chain && activeChainGroupID != nil {
+            onEvent?(.chainBroken)
+            activeChainGroupID = nil
+            chainProgress = 0
+            return
+        }
+
+        // Ketten-Fleck aufgedeckt
+        guard smudge.reward == .chain, let groupID = smudge.chainGroupID else { return }
+
+        if activeChainGroupID == groupID && smudge.chainIndex == chainProgress + 1 {
+            // Richtige Reihenfolge → Fortschritt
+            chainProgress += 1
+            onEvent?(.chainProgress(groupID: groupID, index: chainProgress))
+
+            if chainProgress >= config.chainSize {
+                // Kette komplett → Mega-Bonus!
+                let bonus = config.chainMegaBonus * wave
+                score += bonus
+                onEvent?(.chainCompleted(bonus: bonus))
+                onEvent?(.scoreChanged(score))
+                activeChainGroupID = nil
+                chainProgress = 0
+            }
+        } else if activeChainGroupID == nil && smudge.chainIndex == 1 {
+            // Neue Kette starten
+            activeChainGroupID = groupID
+            chainProgress = 1
+            onEvent?(.chainProgress(groupID: groupID, index: 1))
+        } else {
+            // Falsche Reihenfolge → Kette bricht
+            onEvent?(.chainBroken)
+            activeChainGroupID = nil
+            chainProgress = 0
+        }
     }
 
     // MARK: - Belohnung verarbeiten
@@ -251,7 +402,11 @@ class GameViewModel {
 
         case .doubleStar:
             combo.registerHit(at: now)
-            let points = 25 * wave * combo.multiplier
+            var points = 25 * wave * combo.multiplier
+            // Gold-Bonus: deutlich mehr Punkte
+            if smudge.behavior == .gold {
+                points = config.goldPointsBase * wave * combo.multiplier
+            }
             score += points
             streakCount += 1
             onEvent?(.smudgeRevealed(id: smudge.id, reward: .doubleStar, points: points))
@@ -280,6 +435,23 @@ class GameViewModel {
             streakCount += 1
             onEvent?(.smudgeRevealed(id: smudge.id, reward: .freeze, points: 0))
             onEvent?(.freezeActivated)
+
+        case .chain:
+            combo.registerHit(at: now)
+            let points = 10 * wave * combo.multiplier
+            score += points
+            streakCount += 1
+            onEvent?(.smudgeRevealed(id: smudge.id, reward: .chain, points: points))
+
+        case .bossReward:
+            let points = config.bossPointsBase * wave
+            score += points
+            lives += 1
+            streakCount += 1
+            isBossWave = false
+            onEvent?(.smudgeRevealed(id: smudge.id, reward: .bossReward, points: points))
+            onEvent?(.bossDefeated(bonus: points))
+            onEvent?(.extraLife)
         }
 
         smudgesCleared += 1
@@ -298,6 +470,26 @@ class GameViewModel {
         for i in 0..<smudges.count {
             smudges[i].updatePosition(currentTime: currentTime)
             smudges[i].updateScale(currentTime: currentTime)
+
+            // Öl-Wachstum (braucht Config-Zugriff, daher im ViewModel)
+            if smudges[i].behavior == .oil {
+                let elapsed = CGFloat(currentTime - smudges[i].spawnTime)
+                var rate = config.oilBaseGrowthRate
+                if elapsed > CGFloat(config.oilAccelerationDelay) && smudges[i].progress < config.oilAccelerationThreshold {
+                    rate = config.oilAcceleratedRate
+                }
+                smudges[i].scaleFactor = min(1.0 + elapsed * rate, config.oilMaxScale)
+            }
+        }
+
+        // Gold-Flecken Timeout prüfen (älteste zuerst)
+        for i in (0..<smudges.count).reversed() {
+            if smudges[i].behavior == .gold && !smudges[i].isRevealed {
+                if smudges[i].age(at: currentTime) > config.goldDuration {
+                    onEvent?(.goldExpired(smudges[i].id))
+                    smudges.remove(at: i)
+                }
+            }
         }
 
         // Freeze prüfen
@@ -311,7 +503,18 @@ class GameViewModel {
             onEvent?(.comboChanged(multiplier: 1))
         }
 
-        // Wellen-Check
+        // Boss-Welle: nur weiter wenn Boss besiegt
+        if isBossWave {
+            let allRevealed = !smudges.isEmpty && smudges.allSatisfy { $0.isRevealed }
+            if allRevealed {
+                smudges.removeAll()
+                advanceWave()
+                spawnWave()
+            }
+            return
+        }
+
+        // Normale Wellen-Check
         let allRevealed = !smudges.isEmpty && smudges.allSatisfy { $0.isRevealed }
         let timeSinceWave = CACurrentMediaTime() - lastWaveTime
         let timeForNewWave = timeSinceWave > waveDelay
@@ -319,6 +522,12 @@ class GameViewModel {
         if !isFrozen && (allRevealed || (timeForNewWave && !smudges.isEmpty)) {
             for smudge in smudges where !smudge.isRevealed {
                 onEvent?(.smudgeExpired(smudge.id))
+            }
+            // Kette bricht wenn Welle wechselt
+            if activeChainGroupID != nil {
+                onEvent?(.chainBroken)
+                activeChainGroupID = nil
+                chainProgress = 0
             }
             smudges.removeAll()
             advanceWave()

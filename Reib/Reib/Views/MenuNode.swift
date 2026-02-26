@@ -66,7 +66,7 @@ class MenuNode: SKNode {
             lbTitle.fontName = "AvenirNext-Bold"
             lbTitle.fontSize = 20
             lbTitle.fontColor = SKColor(white: 0.6, alpha: 1.0)
-            lbTitle.position = CGPoint(x: size.width / 2, y: size.height * 0.24)
+            lbTitle.position = CGPoint(x: size.width / 2, y: size.height * 0.20)
             addChild(lbTitle)
 
             for (i, entry) in leaderboard.prefix(5).enumerated() {
@@ -81,7 +81,7 @@ class MenuNode: SKNode {
                 label.fontName = "AvenirNext-Medium"
                 label.fontSize = 16
                 label.fontColor = SKColor(white: 0.5, alpha: 1.0)
-                label.position = CGPoint(x: size.width / 2, y: size.height * 0.20 - CGFloat(i) * 24)
+                label.position = CGPoint(x: size.width / 2, y: size.height * 0.16 - CGFloat(i) * 24)
                 addChild(label)
             }
         }
@@ -110,18 +110,26 @@ class MenuNode: SKNode {
 
     private func setupThemeSelector(size: CGSize) {
         let themes = GameTheme.allThemes
-        let totalWidth: CGFloat = CGFloat(themes.count) * 100 + CGFloat(themes.count - 1) * 12
-        let startX = size.width / 2 - totalWidth / 2 + 50
+        let columns = 3
+        let cardWidth: CGFloat = 96
+        let cardHeight: CGFloat = 70
+        let hSpacing: CGFloat = 12
+        let vSpacing: CGFloat = 10
+
+        let totalRowWidth = CGFloat(columns) * cardWidth + CGFloat(columns - 1) * hSpacing
+        let startX = size.width / 2 - totalRowWidth / 2 + cardWidth / 2
 
         for (i, theme) in themes.enumerated() {
-            let x = startX + CGFloat(i) * 112
-            let y = size.height * 0.38
+            let col = i % columns
+            let row = i / columns
+            let x = startX + CGFloat(col) * (cardWidth + hSpacing)
+            let y = size.height * 0.40 - CGFloat(row) * (cardHeight + vSpacing)
 
             let unlocked = ThemeManager.shared.isUnlocked(theme)
             let isActive = ThemeManager.shared.currentTheme.id == theme.id
 
             // Hintergrund-Karte
-            let card = SKShapeNode(rectOf: CGSize(width: 96, height: 70), cornerRadius: 10)
+            let card = SKShapeNode(rectOf: CGSize(width: cardWidth, height: cardHeight), cornerRadius: 10)
             card.position = CGPoint(x: x, y: y)
             card.name = "theme_\(theme.id.rawValue)"
             card.zPosition = 12
